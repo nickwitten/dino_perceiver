@@ -142,14 +142,14 @@ def train_dino(args):
         args.local_crops_scale,
         args.local_crops_number,
     )
-    dataset = datasets.ImageFolder(args.data_path, transform=transform)
+    dataset = datasets.CIFAR10('./data-cifar10',train=True, download=True, transform=transform) #datasets.ImageFolder(args.data_path, transform=transform)
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,
         sampler=sampler,
-        batch_size=args.batch_size_per_gpu,
+        batch_size=1, #args.batch_size_per_gpu,
         num_workers=args.num_workers,
-        pin_memory=True,
+        pin_memory=False,
         drop_last=True,
     )
     print(f"Data loaded: there are {len(dataset)} images.")
