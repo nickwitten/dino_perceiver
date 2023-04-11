@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 import torch
+torch.cuda.empty_cache()
 import torch.nn as nn
 import torch.distributed as dist
 import torch.backends.cudnn as cudnn
@@ -34,6 +35,11 @@ import utils
 import vision_transformer as vits
 from vision_transformer import DINOHead
 
+#Try importing perceiver 
+#import sys
+#sys.path.append('../perceiver-pytorch')
+from perceiver_pytorch import Perceiver
+
 torchvision_archs = sorted(name for name in torchvision_models.__dict__
     if name.islower() and not name.startswith("__")
     and callable(torchvision_models.__dict__[name]))
@@ -43,7 +49,7 @@ def get_args_parser():
 
     # Model parameters
     parser.add_argument('--arch', default='vit_small', type=str,
-        choices=['vit_tiny', 'vit_small', 'vit_base', 'xcit', 'deit_tiny', 'deit_small'] \
+        choices=['vit_tiny', 'vit_small', 'vit_base', 'xcit', 'deit_tiny', 'deit_small', 'perceiver'] \
                 + torchvision_archs + torch.hub.list("facebookresearch/xcit:main"),
         help="""Name of architecture to train. For quick experiments with ViTs,
         we recommend using vit_tiny or vit_small.""")
@@ -176,6 +182,49 @@ def train_dino(args):
         student = torchvision_models.__dict__[args.arch]()
         teacher = torchvision_models.__dict__[args.arch]()
         embed_dim = student.fc.weight.shape[1]
+    elif args.arch == 'perceiver':
+        student = Perceiver(
+            input_channels = 3,          # number of channels for each token of the input
+            input_axis = 2,              # number of axis for input data (2 for images, 3 for video)
+            num_freq_bands = 6,          # number of freq bands, with original value (2 * K + 1)
+            max_freq = 10.,              # maximum frequency, hyperparameter depending on how fine the data is
+            depth = 6,                   # depth of net. The shape of the final attention mechanism will be:
+                                        #   depth * (cross attention -> self_per_cross_attn * self attention)
+            num_latents = 256,           # number of latents, or induced set points, or centroids. different papers giving it different names
+            latent_dim = 512,            # latent dimension
+            cross_heads = 1,             # number of heads for cross attention. paper said 1
+            latent_heads = 8,            # number of heads for latent self attention, 8
+            cross_dim_head = 64,         # number of dimensions per cross attention head
+            latent_dim_head = 64,        # number of dimensions per latent self attention head
+            num_classes = 1000,          # output number of classes
+            attn_dropout = 0.,
+            ff_dropout = 0.,
+            weight_tie_layers = False,   # whether to weight tie layers (optional, as indicated in the diagram)
+            fourier_encode_data = True,  # whether to auto-fourier encode the data, using the input_axis given. defaults to True, but can be turned off if you are fourier encoding the data yourself
+            self_per_cross_attn = 2      # number of self attention blocks per cross attention
+        )
+
+        teacher = Perceiver(
+            input_channels = 3,          # number of channels for each token of the input
+            input_axis = 2,              # number of axis for input data (2 for images, 3 for video)
+            num_freq_bands = 6,          # number of freq bands, with original value (2 * K + 1)
+            max_freq = 10.,              # maximum frequency, hyperparameter depending on how fine the data is
+            depth = 6,                   # depth of net. The shape of the final attention mechanism will be:
+                                        #   depth * (cross attention -> self_per_cross_attn * self attention)
+            num_latents = 256,           # number of latents, or induced set points, or centroids. different papers giving it different names
+            latent_dim = 512,            # latent dimension
+            cross_heads = 1,             # number of heads for cross attention. paper said 1
+            latent_heads = 8,            # number of heads for latent self attention, 8
+            cross_dim_head = 64,         # number of dimensions per cross attention head
+            latent_dim_head = 64,        # number of dimensions per latent self attention head
+            num_classes = 1000,          # output number of classes
+            attn_dropout = 0.,
+            ff_dropout = 0.,
+            weight_tie_layers = False,   # whether to weight tie layers (optional, as indicated in the diagram)
+            fourier_encode_data = True,  # whether to auto-fourier encode the data, using the input_axis given. defaults to True, but can be turned off if you are fourier encoding the data yourself
+            self_per_cross_attn = 2      # number of self attention blocks per cross attention
+        )
+        embed_dim = 1000 #self.latent_dim should really be in the instanatiation, but it isn't right now so hard code it in
     else:
         print(f"Unknow architecture: {args.arch}")
 
@@ -311,8 +360,24 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
             if i == 0:  # only the first group is regularized
                 param_group["weight_decay"] = wd_schedule[it]
 
+        # Reshape images for perceiver(requires 1x244x244x3, while CIFAR-10 output is 1x3x244x244)
+        im_new = []
+        for im in images:
+            #print(im.shape)
+            #Perceiver requires all the images to be the same shape, so import images with the same image size(224x224x3 for CIFAR-10)
+            if (im.shape[2] == 224):
+                im = torch.reshape(im, (im.shape[0], im.shape[2], im.shape[3], im.shape[1]))
+                #print(im.shape)
+                im_new.append(im)
+            else:
+                continue
+
+        #print(im_new[0].shape)
         # move images to gpu
-        images = [im.cuda(non_blocking=True) for im in images]
+        #print(images[0].shape)
+        images = [im.cuda(non_blocking=True) for im in im_new]
+        print(images[0].shape)
+
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16_scaler is not None):
             teacher_output = teacher(images[:2])  # only the 2 global views pass through the teacher
