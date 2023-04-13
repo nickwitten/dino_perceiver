@@ -486,7 +486,7 @@ def init_distributed_mode(args):
         sys.exit(1)
 
     dist.init_process_group(
-        backend="nccl",
+        backend="gloo",
         init_method=args.dist_url,
         world_size=args.world_size,
         rank=args.rank,
@@ -608,14 +608,22 @@ class MultiCropWrapper(nn.Module):
         self.head = head
 
     def forward(self, x):
+        
+        #print("length: " + str(len(x)))
+        #for i in range(len(x)):
+        #    print("shape" + str(i) +": " + str(x[i].shape))
+        
         # convert to list
         if not isinstance(x, list):
             x = [x]
         idx_crops = torch.cumsum(torch.unique_consecutive(
-            torch.tensor([inp.shape[-1] for inp in x]),
+            torch.tensor([inp.shape[-2] for inp in x]),
             return_counts=True,
         )[1], 0)
         start_idx, output = 0, torch.empty(0).to(x[0].device)
+        
+        #print("crops: " + str(idx_crops))
+        
         for end_idx in idx_crops:
             _out = self.backbone(torch.cat(x[start_idx: end_idx]))
             # The output is a tuple with XCiT model. See:

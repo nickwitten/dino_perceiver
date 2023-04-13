@@ -30,6 +30,10 @@ import torch.nn.functional as F
 from torchvision import datasets, transforms
 from torchvision import models as torchvision_models
 
+import torchvision
+from torchvision.transforms import ToTensor
+from perceiver_pytorch import Perceiver
+
 import utils
 import vision_transformer as vits
 from vision_transformer import DINOHead
@@ -42,8 +46,8 @@ def get_args_parser():
     parser = argparse.ArgumentParser('DINO', add_help=False)
 
     # Model parameters
-    parser.add_argument('--arch', default='vit_small', type=str,
-        choices=['vit_tiny', 'vit_small', 'vit_base', 'xcit', 'deit_tiny', 'deit_small'] \
+    parser.add_argument('--arch', default='Perciever', type=str,
+        choices=['vit_tiny', 'vit_small', 'vit_base', 'xcit', 'deit_tiny', 'deit_small','Perciever'] \
                 + torchvision_archs + torch.hub.list("facebookresearch/xcit:main"),
         help="""Name of architecture to train. For quick experiments with ViTs,
         we recommend using vit_tiny or vit_small.""")
@@ -87,9 +91,9 @@ def get_args_parser():
     parser.add_argument('--clip_grad', type=float, default=3.0, help="""Maximal parameter
         gradient norm if using gradient clipping. Clipping with norm .3 ~ 1.0 can
         help optimization for larger ViT architectures. 0 for disabling.""")
-    parser.add_argument('--batch_size_per_gpu', default=64, type=int,
+    parser.add_argument('--batch_size_per_gpu', default=2, type=int,
         help='Per-GPU batch-size : number of distinct images loaded on one GPU.')
-    parser.add_argument('--epochs', default=100, type=int, help='Number of epochs of training.')
+    parser.add_argument('--epochs', default=20, type=int, help='Number of epochs of training.')
     parser.add_argument('--freeze_last_layer', default=1, type=int, help="""Number of epochs
         during which we keep the output layer fixed. Typically doing so during
         the first epoch helps training. Try increasing this value if the loss does not decrease.""")
@@ -120,7 +124,7 @@ def get_args_parser():
     parser.add_argument('--data_path', default='/path/to/imagenet/train/', type=str,
         help='Please specify path to the ImageNet training data.')
     parser.add_argument('--output_dir', default=".", type=str, help='Path to save logs and checkpoints.')
-    parser.add_argument('--saveckp_freq', default=20, type=int, help='Save checkpoint every x epochs.')
+    parser.add_argument('--saveckp_freq', default=1, type=int, help='Save checkpoint every x epochs.')
     parser.add_argument('--seed', default=0, type=int, help='Random seed.')
     parser.add_argument('--num_workers', default=10, type=int, help='Number of data loading workers per GPU.')
     parser.add_argument("--dist_url", default="env://", type=str, help="""url used to set up
@@ -142,7 +146,18 @@ def train_dino(args):
         args.local_crops_scale,
         args.local_crops_number,
     )
-    dataset = datasets.ImageFolder(args.data_path, transform=transform)
+    #dataset = datasets.ImageFolder(args.data_path, transform=transform)
+    dataset = torchvision.datasets.CIFAR100(
+        root = "data", 
+        train = True, 
+        transform = transform, 
+        download = False)
+    
+    #dataset = torchvision.datasets.Caltech101(
+    #    root = "dataIMN",
+    #    transform = transform, 
+    #    download = False)
+    
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -176,6 +191,48 @@ def train_dino(args):
         student = torchvision_models.__dict__[args.arch]()
         teacher = torchvision_models.__dict__[args.arch]()
         embed_dim = student.fc.weight.shape[1]
+    elif args.arch in ["Perciever"]:
+        student = Perceiver(
+            input_channels = 3,          # number of channels for each token of the input
+            input_axis = 2,              # number of axis for input data (2 for images, 3 for video)
+            num_freq_bands = 6,          # number of freq bands, with original value (2 * K + 1)
+            max_freq = 10.,              # maximum frequency, hyperparameter depending on how fine the data is
+            depth = 2,                   # depth of net. The shape of the final attention mechanism will be:
+                                         #   depth * (cross attention -> self_per_cross_attn * self attention)
+            num_latents = 64,           # number of latents, or induced set points, or centroids. different papers giving it different names
+            latent_dim = 64,            # latent dimension
+            cross_heads = 1,             # number of heads for cross attention. paper said 1
+            latent_heads = 8,            # number of heads for latent self attention, 8
+            cross_dim_head = 64,         # number of dimensions per cross attention head
+            latent_dim_head = 64,        # number of dimensions per latent self attention head
+            num_classes = 100,           # output number of classes
+            attn_dropout = 0.,
+            ff_dropout = 0.,
+            weight_tie_layers = False,   # whether to weight tie layers (optional, as indicated in the diagram)
+            fourier_encode_data = True,  # whether to auto-fourier encode the data, using the input_axis given. defaults to True, but can be turned off if you are fourier encoding the data yourself
+            self_per_cross_attn = 2      # number of self attention blocks per cross attention
+        )
+        teacher = Perceiver(
+            input_channels = 3,          # number of channels for each token of the input
+            input_axis = 2,              # number of axis for input data (2 for images, 3 for video)
+            num_freq_bands = 6,          # number of freq bands, with original value (2 * K + 1)
+            max_freq = 10.,              # maximum frequency, hyperparameter depending on how fine the data is
+            depth = 2,                   # depth of net. The shape of the final attention mechanism will be:
+                                         #   depth * (cross attention -> self_per_cross_attn * self attention)
+            num_latents = 64,           # number of latents, or induced set points, or centroids. different papers giving it different names
+            latent_dim = 64,            # latent dimension
+            cross_heads = 1,             # number of heads for cross attention. paper said 1
+            latent_heads = 8,            # number of heads for latent self attention, 8
+            cross_dim_head = 64,         # number of dimensions per cross attention head
+            latent_dim_head = 64,        # number of dimensions per latent self attention head
+            num_classes = 100,           # output number of classes
+            attn_dropout = 0.,
+            ff_dropout = 0.,
+            weight_tie_layers = False,   # whether to weight tie layers (optional, as indicated in the diagram)
+            fourier_encode_data = True,  # whether to auto-fourier encode the data, using the input_axis given. defaults to True, but can be turned off if you are fourier encoding the data yourself
+            self_per_cross_attn = 2      # number of self attention blocks per cross attention
+        )
+        embed_dim = 100
     else:
         print(f"Unknow architecture: {args.arch}")
 
@@ -312,7 +369,8 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
                 param_group["weight_decay"] = wd_schedule[it]
 
         # move images to gpu
-        images = [im.cuda(non_blocking=True) for im in images]
+        #print("dino shape: "+ str(images.shape))
+        images = [im.permute((0,2,3,1)).cuda(non_blocking=True) for im in images]
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16_scaler is not None):
             teacher_output = teacher(images[:2])  # only the 2 global views pass through the teacher
