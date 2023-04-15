@@ -24,6 +24,10 @@ from torchvision import datasets
 from torchvision import transforms as pth_transforms
 from torchvision import models as torchvision_models
 
+from torch.utils.data import Subset
+import numpy as np
+from perceiver_pytorch import Perceiver
+
 import utils
 import vision_transformer as vits
 
@@ -48,6 +52,28 @@ def eval_linear(args):
         model = torchvision_models.__dict__[args.arch]()
         embed_dim = model.fc.weight.shape[1]
         model.fc = nn.Identity()
+    elif args.arch == 'perceiver':
+        model = Perceiver(
+            input_channels = 3,          # number of channels for each token of the input
+            input_axis = 2,              # number of axis for input data (2 for images, 3 for video)
+            num_freq_bands = 6,          # number of freq bands, with original value (2 * K + 1)
+            max_freq = 10.,              # maximum frequency, hyperparameter depending on how fine the data is
+            depth = 6,                   # depth of net. The shape of the final attention mechanism will be:
+                                        #   depth * (cross attention -> self_per_cross_attn * self attention)
+            num_latents = 64,           # number of latents, or induced set points, or centroids. different papers giving it different names
+            latent_dim = 64,            # latent dimension
+            cross_heads = 1,             # number of heads for cross attention. paper said 1
+            latent_heads = 8,            # number of heads for latent self attention, 8
+            cross_dim_head = 64,         # number of dimensions per cross attention head
+            latent_dim_head = 64,        # number of dimensions per latent self attention head
+            num_classes = 1000,          # output number of classes
+            attn_dropout = 0.,
+            ff_dropout = 0.,
+            weight_tie_layers = False,   # whether to weight tie layers (optional, as indicated in the diagram)
+            fourier_encode_data = True,  # whether to auto-fourier encode the data, using the input_axis given. defaults to True, but can be turned off if you are fourier encoding the data yourself
+            self_per_cross_attn = 2      # number of self attention blocks per cross attention
+        )
+        embed_dim = 1000
     else:
         print(f"Unknow architecture: {args.arch}")
         sys.exit(1)
@@ -68,7 +94,8 @@ def eval_linear(args):
         pth_transforms.ToTensor(),
         pth_transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
     ])
-    dataset_val = datasets.ImageFolder(os.path.join(args.data_path, "val"), transform=val_transform)
+    #dataset_val = datasets.ImageFolder(os.path.join(args.data_path, "val"), transform=val_transform)
+    dataset_val = datasets.CIFAR10('./data-cifar10',train=False, download=True, transform=val_transform) #datasets.ImageFolder(args.data_path, transform=transform)
     val_loader = torch.utils.data.DataLoader(
         dataset_val,
         batch_size=args.batch_size_per_gpu,
@@ -88,7 +115,9 @@ def eval_linear(args):
         pth_transforms.ToTensor(),
         pth_transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
     ])
-    dataset_train = datasets.ImageFolder(os.path.join(args.data_path, "train"), transform=train_transform)
+    #dataset_train = datasets.ImageFolder(os.path.join(args.data_path, "train"), transform=train_transform)
+    dataset_train = datasets.CIFAR10('./data-cifar10',train=True, download=True, transform=train_transform) #datasets.ImageFolder(args.data_path, transform=transform)#ReturnIndexDataset(os.path.join(args.data_path, "train"), transform=transform)
+    #dataset_train = Subset(dataset_train, np.arange(10000))
     sampler = torch.utils.data.distributed.DistributedSampler(dataset_train)
     train_loader = torch.utils.data.DataLoader(
         dataset_train,
@@ -157,6 +186,7 @@ def train(model, linear_classifier, optimizer, loader, epoch, n, avgpool):
     header = 'Epoch: [{}]'.format(epoch)
     for (inp, target) in metric_logger.log_every(loader, 20, header):
         # move to gpu
+        inp = inp.permute(0, 2, 3, 1)
         inp = inp.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
 
@@ -198,6 +228,7 @@ def validate_network(val_loader, model, linear_classifier, n, avgpool):
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Test:'
     for inp, target in metric_logger.log_every(val_loader, 20, header):
+        inp = inp.permute(0, 2, 3, 1)
         # move to gpu
         inp = inp.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)

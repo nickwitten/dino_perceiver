@@ -28,6 +28,7 @@ import torch.nn as nn
 import torch.distributed as dist
 import torch.backends.cudnn as cudnn
 import torch.nn.functional as F
+from torch.utils.data import Subset
 from torchvision import datasets, transforms
 from torchvision import models as torchvision_models
 
@@ -102,7 +103,7 @@ def get_args_parser():
     parser.add_argument("--lr", default=0.0005, type=float, help="""Learning rate at the end of
         linear warmup (highest LR used during training). The learning rate is linearly scaled
         with the batch size, and specified here for a reference batch size of 256.""")
-    parser.add_argument("--warmup_epochs", default=10, type=int,
+    parser.add_argument("--warmup_epochs", default=0, type=int,
         help="Number of epochs for the linear learning-rate warm up.")
     parser.add_argument('--min_lr', type=float, default=1e-6, help="""Target LR at the
         end of optimization. We use a cosine LR schedule with linear warmup.""")
@@ -126,7 +127,7 @@ def get_args_parser():
     parser.add_argument('--data_path', default='/path/to/imagenet/train/', type=str,
         help='Please specify path to the ImageNet training data.')
     parser.add_argument('--output_dir', default=".", type=str, help='Path to save logs and checkpoints.')
-    parser.add_argument('--saveckp_freq', default=20, type=int, help='Save checkpoint every x epochs.')
+    parser.add_argument('--saveckp_freq', default=1, type=int, help='Save checkpoint every x epochs.')
     parser.add_argument('--seed', default=0, type=int, help='Random seed.')
     parser.add_argument('--num_workers', default=10, type=int, help='Number of data loading workers per GPU.')
     parser.add_argument("--dist_url", default="env://", type=str, help="""url used to set up
@@ -149,6 +150,7 @@ def train_dino(args):
         args.local_crops_number,
     )
     dataset = datasets.CIFAR10('./data-cifar10',train=True, download=True, transform=transform) #datasets.ImageFolder(args.data_path, transform=transform)
+    #dataset = Subset(dataset, np.arange(10000)) #Only train on the first 10,000 images to save time
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -188,10 +190,10 @@ def train_dino(args):
             input_axis = 2,              # number of axis for input data (2 for images, 3 for video)
             num_freq_bands = 6,          # number of freq bands, with original value (2 * K + 1)
             max_freq = 10.,              # maximum frequency, hyperparameter depending on how fine the data is
-            depth = 6,                   # depth of net. The shape of the final attention mechanism will be:
+            depth = 2,                   # depth of net. The shape of the final attention mechanism will be:
                                         #   depth * (cross attention -> self_per_cross_attn * self attention)
-            num_latents = 256,           # number of latents, or induced set points, or centroids. different papers giving it different names
-            latent_dim = 512,            # latent dimension
+            num_latents = 64,           # number of latents, or induced set points, or centroids. different papers giving it different names
+            latent_dim = 64,            # latent dimension
             cross_heads = 1,             # number of heads for cross attention. paper said 1
             latent_heads = 8,            # number of heads for latent self attention, 8
             cross_dim_head = 64,         # number of dimensions per cross attention head
@@ -209,10 +211,10 @@ def train_dino(args):
             input_axis = 2,              # number of axis for input data (2 for images, 3 for video)
             num_freq_bands = 6,          # number of freq bands, with original value (2 * K + 1)
             max_freq = 10.,              # maximum frequency, hyperparameter depending on how fine the data is
-            depth = 6,                   # depth of net. The shape of the final attention mechanism will be:
+            depth = 2,                   # depth of net. The shape of the final attention mechanism will be:
                                         #   depth * (cross attention -> self_per_cross_attn * self attention)
-            num_latents = 256,           # number of latents, or induced set points, or centroids. different papers giving it different names
-            latent_dim = 512,            # latent dimension
+            num_latents = 64,           # number of latents, or induced set points, or centroids. different papers giving it different names
+            latent_dim = 64,            # latent dimension
             cross_heads = 1,             # number of heads for cross attention. paper said 1
             latent_heads = 8,            # number of heads for latent self attention, 8
             cross_dim_head = 64,         # number of dimensions per cross attention head
@@ -361,22 +363,24 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
                 param_group["weight_decay"] = wd_schedule[it]
 
         # Reshape images for perceiver(requires 1x244x244x3, while CIFAR-10 output is 1x3x244x244)
-        im_new = []
-        for im in images:
+        #im_new = []
+        #for im in images:
             #print(im.shape)
             #Perceiver requires all the images to be the same shape, so import images with the same image size(224x224x3 for CIFAR-10)
-            if (im.shape[2] == 224):
-                im = torch.reshape(im, (im.shape[0], im.shape[2], im.shape[3], im.shape[1]))
+        #    if (im.shape[2] == 224):
+        #        im = torch.reshape(im, (im.shape[0], im.shape[2], im.shape[3], im.shape[1]))
                 #print(im.shape)
-                im_new.append(im)
-            else:
-                continue
+        #        im_new.append(im)
+        #    else:
+        #        continue
 
         #print(im_new[0].shape)
         # move images to gpu
         #print(images[0].shape)
-        images = [im.cuda(non_blocking=True) for im in im_new]
-        print(images[0].shape)
+        images = [im.cuda(non_blocking=True) for im in images]
+        images = [im.permute((0,2,3,1)).cuda(non_blocking=True) for im in images]
+
+        #print(images[0].shape)
 
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16_scaler is not None):
