@@ -16,12 +16,18 @@ import sys
 import argparse
 
 import torch
+torch.set_printoptions(profile="full")
 from torch import nn
 import torch.distributed as dist
 import torch.backends.cudnn as cudnn
 from torchvision import datasets
 from torchvision import transforms as pth_transforms
 from torchvision import models as torchvision_models
+from torch.utils.data import Subset
+import numpy as np
+from perceiver_pytorch import Perceiver
+
+
 
 import utils
 import vision_transformer as vits
@@ -30,13 +36,15 @@ import vision_transformer as vits
 def extract_feature_pipeline(args):
     # ============ preparing data ... ============
     transform = pth_transforms.Compose([
-        pth_transforms.Resize(256, interpolation=3),
-        pth_transforms.CenterCrop(224),
+        pth_transforms.Resize(40, interpolation=3),
+        pth_transforms.CenterCrop(40),
         pth_transforms.ToTensor(),
         pth_transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
     ])
-    dataset_train = ReturnIndexDataset(os.path.join(args.data_path, "train"), transform=transform)
-    dataset_val = ReturnIndexDataset(os.path.join(args.data_path, "val"), transform=transform)
+    dataset_train = datasets.CIFAR10('./data-cifar10',train=True, download=True, transform=transform) #datasets.ImageFolder(args.data_path, transform=transform)#ReturnIndexDataset(os.path.join(args.data_path, "train"), transform=transform)
+    #dataset_train = Subset(dataset_train, np.arange(10000))
+    dataset_val = datasets.CIFAR10('./data-cifar10',train=False, download=True, transform=transform) #datasets.ImageFolder(args.data_path, transform=transform)
+    #dataset_val = #ReturnIndexDataset(os.path.join(args.data_path, "val"), transform=transform)
     sampler = torch.utils.data.DistributedSampler(dataset_train, shuffle=False)
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train,
@@ -53,7 +61,7 @@ def extract_feature_pipeline(args):
         pin_memory=True,
         drop_last=False,
     )
-    print(f"Data loaded with {len(dataset_train)} train and {len(dataset_val)} val imgs.")
+    #print(f"Data loaded with {len(dataset_train)} train and {len(dataset_val)} val imgs.")
 
     # ============ building network ... ============
     if "vit" in args.arch:
@@ -64,6 +72,28 @@ def extract_feature_pipeline(args):
     elif args.arch in torchvision_models.__dict__.keys():
         model = torchvision_models.__dict__[args.arch](num_classes=0)
         model.fc = nn.Identity()
+    elif args.arch == 'perceiver':
+        model = Perceiver(
+            input_channels = 3,          # number of channels for each token of the input
+            input_axis = 2,              # number of axis for input data (2 for images, 3 for video)
+            num_freq_bands = 6,          # number of freq bands, with original value (2 * K + 1)
+            max_freq = 10.,              # maximum frequency, hyperparameter depending on how fine the data is
+            depth = 2,                   # depth of net. The shape of the final attention mechanism will be:
+                                        #   depth * (cross attention -> self_per_cross_attn * self attention)
+            num_latents = 64,           # number of latents, or induced set points, or centroids. different papers giving it different names
+            latent_dim = 64,            # latent dimension
+            cross_heads = 1,             # number of heads for cross attention. paper said 1
+            latent_heads = 8,            # number of heads for latent self attention, 8
+            cross_dim_head = 64,         # number of dimensions per cross attention head
+            latent_dim_head = 64,        # number of dimensions per latent self attention head
+            num_classes = 1000,          # output number of classes
+            attn_dropout = 0.,
+            ff_dropout = 0.,
+            weight_tie_layers = False,   # whether to weight tie layers (optional, as indicated in the diagram)
+            fourier_encode_data = True,  # whether to auto-fourier encode the data, using the input_axis given. defaults to True, but can be turned off if you are fourier encoding the data yourself
+            self_per_cross_attn = 2      # number of self attention blocks per cross attention
+        )
+
     else:
         print(f"Architecture {args.arch} non supported")
         sys.exit(1)
@@ -72,17 +102,40 @@ def extract_feature_pipeline(args):
     model.eval()
 
     # ============ extract features ... ============
+    torch.set_printoptions(threshold=5000)
     print("Extracting features for train set...")
     train_features = extract_features(model, data_loader_train, args.use_cuda)
+    print("Train Features: " + str(train_features))
+    print("Train Features Shape: " + str(train_features.shape))
+    print("Arg Max Train Features " + str(np.argmax(train_features.cpu(), axis=1)))
+    train_features.cuda()
     print("Extracting features for val set...")
     test_features = extract_features(model, data_loader_val, args.use_cuda)
+    print("Test Features: " + str(test_features))
+    print("Test Features Shape: " + str(test_features.shape))
+    print("Arg Max Test Features " + str(np.argmax(test_features.cpu(), axis=1)))
 
-    if utils.get_rank() == 0:
-        train_features = nn.functional.normalize(train_features, dim=1, p=2)
-        test_features = nn.functional.normalize(test_features, dim=1, p=2)
+   
 
-    train_labels = torch.tensor([s[-1] for s in dataset_train.samples]).long()
-    test_labels = torch.tensor([s[-1] for s in dataset_val.samples]).long()
+    test_feat_vec = np.argmax(test_features.cpu(), axis=1)
+    print("Argmax Shape" + str(test_feat_vec.shape))
+    #if utils.get_rank() == 0:
+        #train_features = nn.functional.normalize(train_features, dim=1, p=2)
+        #test_features = nn.functional.normalize(test_features, dim=1, p=2)
+
+    train_labels = torch.tensor(dataset_train.targets) #torch.tensor([s[-1] for s in dataset_train.dataset.samples]).long()
+    print("Train")
+    print(train_labels.shape)
+    test_labels = torch.tensor(dataset_val.targets) #torch.tensor([s[-1] for s in dataset_val.dataset.samples]).long()
+    print("Test")
+    print(test_labels)
+
+    #Compare test_labels to test_feat_vec
+    eq_check = np.array(test_labels.cpu() == test_feat_vec.cpu())
+    print(eq_check)
+    accuracy = np.sum(eq_check)/50000
+    print("Accuracy : " + str(accuracy))
+
     # save features and labels
     if args.dump_features and dist.get_rank() == 0:
         torch.save(train_features.cpu(), os.path.join(args.dump_features, "trainfeat.pth"))
@@ -98,6 +151,10 @@ def extract_features(model, data_loader, use_cuda=True, multiscale=False):
     features = None
     for samples, index in metric_logger.log_every(data_loader, 10):
         samples = samples.cuda(non_blocking=True)
+        #print("Before " + str(samples.shape))
+        samples = samples.permute(0, 2, 3, 1)
+        #print("After " + str(samples.shape))
+        #print(samples.shape)
         index = index.cuda(non_blocking=True)
         if multiscale:
             feats = utils.multi_scale(samples, model)
@@ -190,7 +247,7 @@ class ReturnIndexDataset(datasets.ImageFolder):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Evaluation with weighted k-NN on ImageNet')
-    parser.add_argument('--batch_size_per_gpu', default=128, type=int, help='Per-GPU batch-size')
+    parser.add_argument('--batch_size_per_gpu', default=250, type=int, help='Per-GPU batch-size')
     parser.add_argument('--nb_knn', default=[10, 20, 100, 200], nargs='+', type=int,
         help='Number of NN to use. 20 is usually working the best.')
     parser.add_argument('--temperature', default=0.07, type=float,

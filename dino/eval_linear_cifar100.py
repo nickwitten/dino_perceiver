@@ -95,7 +95,7 @@ def eval_linear(args):
         pth_transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
     ])
     #dataset_val = datasets.ImageFolder(os.path.join(args.data_path, "val"), transform=val_transform)
-    dataset_val = datasets.CIFAR10('./data-cifar10',train=False, download=True, transform=val_transform) #datasets.ImageFolder(args.data_path, transform=transform)
+    dataset_val = datasets.CIFAR100('./data-cifar100',train=False, download=True, transform=val_transform) #datasets.ImageFolder(args.data_path, transform=transform)
     val_loader = torch.utils.data.DataLoader(
         dataset_val,
         batch_size=args.batch_size_per_gpu,
@@ -116,7 +116,7 @@ def eval_linear(args):
         pth_transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
     ])
     #dataset_train = datasets.ImageFolder(os.path.join(args.data_path, "train"), transform=train_transform)
-    dataset_train = datasets.CIFAR10('./data-cifar10',train=True, download=True, transform=train_transform) #datasets.ImageFolder(args.data_path, transform=transform)#ReturnIndexDataset(os.path.join(args.data_path, "train"), transform=transform)
+    dataset_train = datasets.CIFAR100('./data-cifar100',train=True, download=True, transform=train_transform) #datasets.ImageFolder(args.data_path, transform=transform)#ReturnIndexDataset(os.path.join(args.data_path, "train"), transform=transform)
     #dataset_train = Subset(dataset_train, np.arange(2000))
     sampler = torch.utils.data.distributed.DistributedSampler(dataset_train)
     train_loader = torch.utils.data.DataLoader(
@@ -186,7 +186,7 @@ def train(model, linear_classifier, optimizer, loader, epoch, n, avgpool):
     header = 'Epoch: [{}]'.format(epoch)
     for (inp, target) in metric_logger.log_every(loader, 20, header):
         # move to gpu
-        inp = inp.permute(0, 2, 3, 1)
+        #inp = inp.permute(0, 2, 3, 1)
         inp = inp.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
 
@@ -228,7 +228,7 @@ def validate_network(val_loader, model, linear_classifier, n, avgpool):
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Test:'
     for inp, target in metric_logger.log_every(val_loader, 20, header):
-        inp = inp.permute(0, 2, 3, 1)
+        #inp = inp.permute(0, 2, 3, 1)
         # move to gpu
         inp = inp.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)

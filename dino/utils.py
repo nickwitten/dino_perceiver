@@ -486,7 +486,7 @@ def init_distributed_mode(args):
         sys.exit(1)
 
     dist.init_process_group(
-        backend="nccl",
+        backend="gloo",
         init_method=args.dist_url,
         world_size=args.world_size,
         rank=args.rank,
@@ -612,7 +612,7 @@ class MultiCropWrapper(nn.Module):
         if not isinstance(x, list):
             x = [x]
         idx_crops = torch.cumsum(torch.unique_consecutive(
-            torch.tensor([inp.shape[-1] for inp in x]),
+            torch.tensor([inp.shape[-2] for inp in x]),
             return_counts=True,
         )[1], 0)
         start_idx, output = 0, torch.empty(0).to(x[0].device)

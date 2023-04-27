@@ -94,7 +94,7 @@ def get_args_parser():
     parser.add_argument('--clip_grad', type=float, default=3.0, help="""Maximal parameter
         gradient norm if using gradient clipping. Clipping with norm .3 ~ 1.0 can
         help optimization for larger ViT architectures. 0 for disabling.""")
-    parser.add_argument('--batch_size_per_gpu', default=500, type=int,
+    parser.add_argument('--batch_size_per_gpu', default=400, type=int,
         help='Per-GPU batch-size : number of distinct images loaded on one GPU.')
     parser.add_argument('--epochs', default=1000, type=int, help='Number of epochs of training.')
     parser.add_argument('--freeze_last_layer', default=5, type=int, help="""Number of epochs
@@ -149,7 +149,7 @@ def train_dino(args):
         args.local_crops_scale,
         args.local_crops_number,
     )
-    dataset = datasets.CIFAR10('./data-cifar10',train=True, download=True, transform=transform) #datasets.ImageFolder(args.data_path, transform=transform)
+    dataset = datasets.CIFAR100('./data-cifar100',train=True, download=True, transform=transform) #datasets.ImageFolder(args.data_path, transform=transform)
     #dataset = Subset(dataset, np.arange(2000)) #Only train on the first 10,000 images to save time
     sampler = torch.utils.data.DistributedSampler(dataset, shuffle=True)
     data_loader = torch.utils.data.DataLoader(
