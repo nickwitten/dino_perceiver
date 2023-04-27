@@ -13,11 +13,13 @@ from perceiver_pytorch import Perceiver
 import matplotlib.pyplot as plt
 import os
 from utils import load_pretrained_weights
+from sklearn.decomposition import PCA
 
 """
 Create model
 """
-NUM_CLASSES = 1000
+OUTPUT_SIZE = 1000
+NUM_CLASSES = 10
 # model = Perceiver(
 #     input_channels = 3,          # number of channels for each token of the input
 #     input_axis = 2,              # number of axis for input data (2 for images, 3 for video)
@@ -31,7 +33,7 @@ NUM_CLASSES = 1000
 #     latent_heads = 8,            # number of heads for latent self attention, 8
 #     cross_dim_head = 64,         # number of dimensions per cross attention head
 #     latent_dim_head = 64,        # number of dimensions per latent self attention head
-#     num_classes = NUM_CLASSES,           # output number of classes
+#     num_classes = OUTPUT_SIZE,           # output number of classes
 #     attn_dropout = 0.,
 #     ff_dropout = 0.,
 #     weight_tie_layers = False,   # whether to weight tie layers (optional, as indicated in the diagram)
@@ -51,7 +53,7 @@ model = Perceiver(
     latent_heads = 8,            # number of heads for latent self attention, 8
     cross_dim_head = 64,         # number of dimensions per cross attention head
     latent_dim_head = 64,        # number of dimensions per latent self attention head
-    num_classes = NUM_CLASSES,          # output number of classes
+    num_classes = OUTPUT_SIZE,          # output number of classes
     attn_dropout = 0.,
     ff_dropout = 0.,
     weight_tie_layers = False,   # whether to weight tie layers (optional, as indicated in the diagram)
@@ -97,18 +99,31 @@ output = model(test_features.permute((0,2,3,1)))
 
 output = output.cpu()
 output = output.detach().numpy()
+
+pca = PCA(n_components=2)
+pca.fit(output)
+output = pca.transform(output)
+
 test_labels = test_labels.numpy()
 print(output)
 print(output.shape)
-for i in range(NUM_CLASSES):
+plt.figure(figsize=(10, 10))
+plt.xlim([-5, 5])
+plt.ylim([-5, 5])
+# for i in range(NUM_CLASSES):
+for i in [6, 8]:
     mask = (test_labels == i)
     outputs_for_class = output[mask]
     x = []
     y = []
     if len(outputs_for_class):
         x = outputs_for_class[:, 0]
-        y = outputs_for_class[:, 499]
+        y = outputs_for_class[:, 1]
+    # plt.subplot(5,2,i+1)
+    # plt.xlim([-5, 5])
+    # plt.ylim([-5, 5])
     plt.scatter(x, y)
-plt.savefig('output.png')
+plt.tight_layout()
+plt.savefig('/storage/home/hcocice1/nwitten3/output.png')
 
 

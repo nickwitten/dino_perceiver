@@ -62,7 +62,8 @@ model = Perceiver(
 
 
 
-weight_path = "/storage/home/hcocice1/nwitten3/weights_0260_cifar100.pth"
+weight_path = "/storage/home/hcocice1/nwitten3/checkpoint0780-cifar10.pth"
+# weight_path = "/storage/home/hcocice1/nwitten3/checkpoint0820-cifar100.pth"
 if os.path.exists(weight_path):
     print("Loading Weights")
     load_pretrained_weights(model, weight_path, "student", None, None)
@@ -73,13 +74,26 @@ if os.path.exists(weight_path):
 Create Data
 """
 
-training_data = torchvision.datasets.CIFAR100(
+# training_data = torchvision.datasets.CIFAR100(
+#     root = "data", 
+#     train = True, 
+#     transform = ToTensor(), 
+#     download = False)
+# 
+# test_data = torchvision.datasets.CIFAR100(
+#     root = "data", 
+#     train = False, 
+#     transform = ToTensor(), 
+#     target_transform = None, 
+#     download = False)
+
+training_data = torchvision.datasets.CIFAR10(
     root = "data", 
     train = True, 
     transform = ToTensor(), 
     download = False)
 
-test_data = torchvision.datasets.CIFAR100(
+test_data = torchvision.datasets.CIFAR10(
     root = "data", 
     train = False, 
     transform = ToTensor(), 
